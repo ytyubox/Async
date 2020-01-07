@@ -117,6 +117,8 @@ Wait for block to finish:
 
 private class Reference<T> {
     var value: T?
+	var error:Error?
+	var queue:GCD?
 }
 
 public typealias Async = AsyncBlock<Void, Void>
@@ -160,7 +162,7 @@ public struct AsyncBlock<In, Out> {
     - SeeAlso: Has parity with non-static method
     */
     @discardableResult
-    public static func main<O>(after seconds: Double? = nil, _ block: @escaping () -> O) -> AsyncBlock<Void, O> {
+    public static func main<O>(after seconds: Double? = nil, _ block: @escaping ()  throws-> O) -> AsyncBlock<Void, O> {
         AsyncBlock.async(after: seconds, block: block, queue: .main)
     }
 
@@ -176,7 +178,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with non-static method
      */
     @discardableResult
-    public static func userInteractive<O>(after seconds: Double? = nil, _ block: @escaping () -> O) -> AsyncBlock<Void, O> {
+    public static func userInteractive<O>(after seconds: Double? = nil, _ block: @escaping ()  throws-> O) -> AsyncBlock<Void, O> {
         AsyncBlock.async(after: seconds, block: block, queue: .userInteractive)
     }
 
@@ -192,7 +194,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with non-static method
      */
     @discardableResult
-    public static func userInitiated<O>(after seconds: Double? = nil, _ block: @escaping () -> O) -> AsyncBlock<Void, O> {
+    public static func userInitiated<O>(after seconds: Double? = nil, _ block: @escaping ()  throws-> O) -> AsyncBlock<Void, O> {
         Async.async(after: seconds, block: block, queue: .userInitiated)
     }
 
@@ -208,7 +210,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with non-static method
      */
     @discardableResult
-    public static func utility<O>(after seconds: Double? = nil, _ block: @escaping () -> O) -> AsyncBlock<Void, O> {
+    public static func utility<O>(after seconds: Double? = nil, _ block: @escaping ()  throws-> O) -> AsyncBlock<Void, O> {
         Async.async(after: seconds, block: block, queue: .utility)
     }
 
@@ -224,7 +226,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with non-static method
      */
     @discardableResult
-    public static func background<O>(after seconds: Double? = nil, _ block: @escaping () -> O) -> AsyncBlock<Void, O> {
+    public static func background<O>(after seconds: Double? = nil, _ block: @escaping ()  throws-> O) -> AsyncBlock<Void, O> {
         Async.async(after: seconds, block: block, queue: .background)
     }
 
@@ -240,7 +242,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with non-static method
      */
     @discardableResult
-    public static func custom<O>(queue: DispatchQueue, after seconds: Double? = nil, _ block: @escaping () -> O) -> AsyncBlock<Void, O> {
+    public static func custom<O>(queue: DispatchQueue, after seconds: Double? = nil, _ block: @escaping ()  throws-> O) -> AsyncBlock<Void, O> {
         Async.async(after: seconds, block: block, queue: .custom(queue: queue))
     }
 
@@ -257,10 +259,15 @@ public struct AsyncBlock<In, Out> {
      - returns: An `Async` struct which encapsulates the `@convention(block) () -> Swift.Void`
      */
 
-    private static func async<O>(after seconds: Double? = nil, block: @escaping () -> O, queue: GCD) -> AsyncBlock<Void, O> {
+    private static func async<O>(after seconds: Double? = nil, block: @escaping () throws -> O, queue: GCD) -> AsyncBlock<Void, O> {
         let reference = Reference<O>()
+		reference.queue = queue
         let block = DispatchWorkItem(block: {
-            reference.value = block()
+			do {
+				reference.value = try block()
+			}catch {
+				reference.error = error
+			}
         })
 
         if let seconds = seconds {
@@ -276,7 +283,18 @@ public struct AsyncBlock<In, Out> {
 
 
     // MARK: - Instance methods (matches static ones)
-
+	@discardableResult
+	public func `catch`(respondBlock:@escaping (Error)->Void) ->AsyncBlock<In,Out> {
+		let queue = output_.queue!.queue
+		let c = {
+			if let error = self.output_.error {
+				respondBlock(error)
+			}
+		}
+		let item = DispatchWorkItem(block: c)
+		block.notify(queue: queue, execute: item)
+		return self
+	}
     /**
     Sends the a block to be run asynchronously on the main thread, after the current block has finished.
 
@@ -288,8 +306,9 @@ public struct AsyncBlock<In, Out> {
 
     - SeeAlso: Has parity with static method
     */
+	
     @discardableResult
-    public func main<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) -> O) -> AsyncBlock<Out, O> {
+    public func main<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) throws -> O) -> AsyncBlock<Out, O> {
         chain(after: seconds, block: chainingBlock, queue: .main)
     }
 
@@ -305,7 +324,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with static method
      */
     @discardableResult
-    public func userInteractive<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) -> O) -> AsyncBlock<Out, O> {
+    public func userInteractive<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) throws -> O) -> AsyncBlock<Out, O> {
         chain(after: seconds, block: chainingBlock, queue: .userInteractive)
     }
 
@@ -321,7 +340,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with static method
      */
     @discardableResult
-    public func userInitiated<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) -> O) -> AsyncBlock<Out, O> {
+    public func userInitiated<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) throws -> O) -> AsyncBlock<Out, O> {
         chain(after: seconds, block: chainingBlock, queue: .userInitiated)
     }
 
@@ -337,7 +356,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with static method
      */
     @discardableResult
-    public func utility<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) -> O) -> AsyncBlock<Out, O> {
+    public func utility<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) throws -> O) -> AsyncBlock<Out, O> {
         chain(after: seconds, block: chainingBlock, queue: .utility)
     }
 
@@ -353,7 +372,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with static method
      */
     @discardableResult
-    public func background<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) -> O) -> AsyncBlock<Out, O> {
+    public func background<O>(after seconds: Double? = nil, _ chainingBlock: @escaping (Out) throws -> O) -> AsyncBlock<Out, O> {
         chain(after: seconds, block: chainingBlock, queue: .background)
     }
 
@@ -369,7 +388,7 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: Has parity with static method
      */
     @discardableResult
-    public func custom<O>(queue: DispatchQueue, after seconds: Double? = nil, _ chainingBlock: @escaping (Out) -> O) -> AsyncBlock<Out, O> {
+    public func custom<O>(queue: DispatchQueue, after seconds: Double? = nil, _ chainingBlock: @escaping (Out) throws -> O) -> AsyncBlock<Out, O> {
         chain(after: seconds, block: chainingBlock, queue: .custom(queue: queue))
     }
 
@@ -431,10 +450,20 @@ public struct AsyncBlock<In, Out> {
      - SeeAlso: dispatch_block_notify, dispatch_block_create
      */
 
-    private func chain<O>(after seconds: Double? = nil, block chainingBlock: @escaping (Out) -> O, queue: GCD) -> AsyncBlock<Out, O> {
+    private func chain<O>(after seconds: Double? = nil,
+						  block chainingBlock: @escaping (Out) throws -> O,
+						  queue: GCD) -> AsyncBlock<Out, O> {
         let reference = Reference<O>()
+		reference.queue = queue
         let dispatchWorkItem = DispatchWorkItem(block: {
-            reference.value = chainingBlock(self.output_.value!)
+			guard let value = self.output_.value else {
+				return reference.error = self.output_.error!
+			}
+			do {
+            reference.value = try chainingBlock(value)
+			}catch {
+				reference.error = error
+			}
         })
 
         let queue = queue.queue
@@ -547,7 +576,7 @@ public struct Apply {
 The **AsyncGroup** struct facilitates working with groups of asynchronous blocks. Handles a internally `dispatch_group_t`.
 
 Multiple dispatch blocks with GCD:
-
+```swift
     let group = AsyncGroup()
     group.background {
         // Run on background queue
@@ -556,7 +585,7 @@ Multiple dispatch blocks with GCD:
         // Run on untility queue, after the previous block
     }
     group.wait()
-
+```
 All moderns queue classes:
 
     group.main {}
@@ -566,10 +595,10 @@ All moderns queue classes:
     group.background {}
 
 Custom queues:
-
+```swift
     let customQueue = dispatch_queue_create("Label", DISPATCH_QUEUE_CONCURRENT)
     group.customQueue(customQueue) {}
-
+```
 Wait for group to finish:
 
     let group = AsyncGroup()
